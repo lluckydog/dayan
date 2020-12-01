@@ -546,15 +546,69 @@ class Weibo:
                 date_start =  datetime.date.today()- datetime.timedelta(5)
                 date_end = datetime.date.today()
                 time_spread = datetime.timedelta(days=1)
-                url_format = "https://weibo.cn/search/mblog?hideSearchFrame=&keyword={}" \
-                            "&advancedfilter=1&starttime={}&endtime={}&sort=time&page=1"
-                         
-                urls = []
-                while date_start < date_end:
-                    next_time = date_start + time_spread
-                    url = url_format.format(keyword, date_start.strftime("%Y%m%d"), next_time.strftime("%Y%m%d"))
-                    urls.append(url)
-                    date_start = next_time
+                url_format = "https://weibo.cn/search/mblog?hideSearchFrame=&keyword=" + self.keyword + "&page={}" 
+                response = requests.get(url = url_format.format(1), headers=self.agent, cookies=self.cookie)
+                
+                
+                all_page = re.search(r'/>&nbsp;1/(\d+)页</div>', response.text)
+                if all_page:
+                    all_page = all_page.group(1)
+                    all_page = int(all_page)
+                    if all_page>5:
+                        all_page = 5
+                    for page_num in range(2, all_page + 1):
+                        page_url = response.url.replace('page=1', 'page={}'.format(page_num))
+                        
+                for i in range(1,all_page+1):
+                    tree_node = etree.HTML(response.body)
+                    tweet_nodes = tree_node.xpath('//div[@class="c" and @id]')
+                    for tweet_node in tweet_nodes:
+                        try:
+                            tweet_item = TweetsInfo()
+                            
+                            tweet_repost_url = tweet_node.xpath('.//a[contains(text(),"转发[")]/@href')[0]
+                            user_tweet_id = re.search(r'/repost/(.*?)\?uid=(\d+)', tweet_repost_url)
+                            tweet_item.UserInfo_id = user_tweet_id.group(2)
+                            tweet_item._id = user_tweet_id.group(1)
+                            create_time_info_node = tweet_node.xpath('.//span[@class="ct"]')[-1]
+                            create_time_info = create_time_info_node.xpath('string(.)')
+                            if "来自" in create_time_info:
+                                tweet_item.PubTime = time_fix(create_time_info.split('来自')[0].strip())
+                                tweet_time.Tools = create_time_info.split('来自')[1].strip()
+                            else:
+                                tweet_time.PubTime = time_fix(create_time_info.strip())
+                                
+                            like_num = tweet_node.xpath('.//a[contains(text(),"赞[")]/text()')[-1]
+                            tweet_item.Like = int(re.search('\d+', like_num).group())
+                            
+                            repost_num = tweet_node.xpath('.//a[contains(text(),"转发[")]/text()')[-1]
+                            tweet_item.Transfer = int(re.search('\d+', repost_num).group())
+
+                            comment_num = tweet_node.xpath(
+                                './/a[contains(text(),"评论[") and not(contains(text(),"原文"))]/text()')[-1]
+                            tweet_item.Comment =  int(re.search('\d+', comment_num).group())
+                            
+                            map_node = tweet_node.xpath('.//a[contains(text(),"显示地图")]')
+                            if map_node:
+                                map_node = map_node[0]
+                                map_node_url = map_node.xpath('./@href')[0]
+                                map_info = re.search(r'xy=(.*?)&', map_node_url).group(1)
+                                tweet_item.Co_oridinates = map_info
+                            else:
+                                tweet_item.Co_oridinates = u"无"
+                            
+                            all_content_link = tweet_node.xpath('.//a[text()="全文" and contains(@href,"ckAll=1")]')
+                            if all_content_link:
+                                all_content_url = "https://weibo.cn" + all_content_link[0].xpath('./@href')[0]
+                                r = requests.get(url = all_content_url.format(1), headers=self.agent, cookies=self.cookie)
+                                temp_node = etree.HTML(r.body)
+                                content_node = temp_node.xpath('//*[@id="M_"]/div[1]')[0]
+                                tweet_item.content = extract_weibo_content(etree.tostring(content_node, encoding='unicode'))
+                                
+                            else:
+                                tweet_html = etree.tostring(tweet_node, encoding='unicode')
+                                tweet_item.content = extract_weibo_content(tweet_html)
+                
 
     
             
@@ -564,5 +618,4 @@ class Weibo:
             
         
        
-        
         
